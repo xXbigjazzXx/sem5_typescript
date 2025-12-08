@@ -13,8 +13,10 @@
       background: #111520; box-shadow: 0 10px 30px rgba(0,0,0,.35);
       max-width: 100%;
     }
-    video { display: none; width: 100%; height: auto; transform: scaleX(-1); }
-    canvas#canvas { width: 100%; height: auto; transform: scaleX(-1); image-rendering: crisp-edges; }
+    /* Video stays hidden; we draw it onto the canvas mirrored in JS */
+    video { display: none; width: 100%; height: auto; }
+    /* IMPORTANT: canvas is NOT mirrored via CSS anymore */
+    canvas#canvas { width: 100%; height: auto; image-rendering: crisp-edges; }
     .hint { opacity: .8; font-size: 14px; }
 
     .gallery {
@@ -33,7 +35,7 @@
     <canvas id="canvas"></canvas>
   </div>
   <p class="hint">
-    Mini-game: follow the triangle and hit the indicated button within <strong>2s</strong>. It flashes green on success, red on fail.
+    Mini-game: follow the triangle and hit the indicated button within <strong>2s</strong>. You have <strong>3 lives</strong> ❤️.
   </p>
 
   <section>

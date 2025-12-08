@@ -8,7 +8,6 @@ const gallery = document.getElementById("gallery") as HTMLDivElement;
 let previousFrame: ImageData | null = null;
 let lastCaptureCanvas: HTMLCanvasElement | null = null;
 
-// Debounce (for non-game actions if you re-enable them later)
 const lastTriggerAt: Record<string, number> = {};
 const COOLDOWN_MS = 600;
 
@@ -17,10 +16,15 @@ const GAME_MODE = true;
 const ROUND_MS = 2000;   // player has 2 seconds
 const FLASH_MS = 500;    // flash success/fail for 0.5s
 
+// Lives / Game Over
+const MAX_HP = 3;
+let hp = MAX_HP;
+let gameOver = false;
+
 let roundActive = false;
 let roundEndsAt = 0;
-let targetIndex = 0;         // which button is the target
-let hitRecorded = false;     // did the player hit the correct target this round?
+let targetIndex = 0;
+let hitRecorded = false;
 
 let flashingTarget: number | null = null;
 let flashEndsAt = 0;
@@ -37,7 +41,7 @@ const BTN_RADIUS = 12;
 type Side = "top" | "left" | "right";
 type Button = {
     action: "capture" | "grayscale" | "save";
-    side: Side; // where the triangle is positioned relative to this button
+    side: Side; // triangle positioning relative to this button
     w: number;
     h: number;
     x: number | (() => number);
@@ -67,7 +71,7 @@ async function startCamera() {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
         await video.play();
-        startRound(); // kick off the first mini-game round
+        startRound();
         requestAnimationFrame(processFrame);
     } catch (err) {
         console.error("Camera error:", err);
@@ -76,6 +80,7 @@ async function startCamera() {
 
 // ---------- Game flow ----------
 function startRound() {
+    if (gameOver) return;
     roundActive = true;
     hitRecorded = false;
     targetIndex = Math.floor(Math.random() * buttons.length);
@@ -89,19 +94,17 @@ function endRound() {
     flashingTarget = targetIndex;
     flashColor = hitRecorded ? "success" : "fail";
     flashEndsAt = performance.now() + FLASH_MS;
+
+    if (!hitRecorded) {
+        hp = Math.max(0, hp - 1);
+        if (hp === 0) gameOver = true;
+    }
 }
 
 function maybeAdvanceGameClock() {
     const now = performance.now();
-
-    if (roundActive && now >= roundEndsAt) {
-        endRound();
-    }
-
-    if (!roundActive && flashingTarget !== null && now >= flashEndsAt) {
-        // flash finished, start a new round
-        startRound();
-    }
+    if (!gameOver && roundActive && now >= roundEndsAt) endRound();
+    if (!gameOver && !roundActive && flashingTarget !== null && now >= flashEndsAt) startRound();
 }
 
 // ---------- Main loop ----------
@@ -111,26 +114,34 @@ function processFrame() {
         return;
     }
 
-    // Match canvas to video size
+    // Canvas size
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    // Draw live frame
+    // 1) Draw the VIDEO MIRRORED (selfie) ***only this step is mirrored***
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    // Read the mirrored frame for motion detection
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    // Motion detection
+    // 2) Motion detection (uses the mirrored image so it matches what the user sees)
     if (previousFrame) {
         const diff = detectMotion(previousFrame, currentFrame);
-        checkVirtualButtons(diff); // updates hitRecorded etc.
+        if (!gameOver) checkVirtualButtons(diff);
     }
 
-    // Visuals
-    drawVirtualButtons();      // buttons only (no icons/labels)
-    drawTriangleIndicator();   // triangle next to target
+    // 3) Draw UI/HUD in NORMAL orientation (not mirrored)
+    drawVirtualButtons();
+    if (!gameOver) drawTriangleIndicator();
+    drawHearts();
+    if (gameOver) drawGameOver();
 
     // Game timing transitions
-    maybeAdvanceGameClock();
+    if (!gameOver) maybeAdvanceGameClock();
 
     previousFrame = currentFrame;
     requestAnimationFrame(processFrame);
@@ -151,7 +162,7 @@ function detectMotion(prev: ImageData, curr: ImageData): Uint8ClampedArray {
     return diff;
 }
 
-// ---------- Button hit test / triggering ----------
+// ---------- Button hit test ----------
 function checkVirtualButtons(diff: Uint8ClampedArray) {
     buttons.forEach((btn, idx) => {
         const x = resolve(btn.x);
@@ -168,42 +179,34 @@ function checkVirtualButtons(diff: Uint8ClampedArray) {
 
         const ratio = motionCount / totalPixels;
 
-        // In game mode: only record hits, don't run actions
         if (GAME_MODE && roundActive && idx === targetIndex && ratio > 0.15) {
-            hitRecorded = true; // user hit the correct button during the 2s window
+            hitRecorded = true;
         }
-
-        // To also trigger original actions while playing, you could add that here.
     });
 }
 
-// ---------- Drawing: buttons (with game feedback colors) ----------
+// ---------- Draw: buttons ----------
 function drawVirtualButtons() {
     const now = performance.now();
     buttons.forEach((btn, idx) => {
         const x = resolve(btn.x);
         const y = resolve(btn.y);
 
-        // Determine fill color:
         let fill = BTN_COLOR;
-
-        // During flash window, tint the target button green/red
         if (!roundActive && flashingTarget === idx && now < flashEndsAt) {
             fill = flashColor === "success" ? "rgba(38,201,64,0.45)" : "rgba(230,67,67,0.45)";
         }
 
-        // Draw rounded rect (no icons/labels)
         roundRect(ctx, x, y, btn.w, btn.h, BTN_RADIUS);
         ctx.fillStyle = fill; ctx.fill();
 
-        // Border: brighten the active target during the round
         let border = BTN_BORDER;
-        if (roundActive && idx === targetIndex) border = "rgba(255,255,255,0.95)";
+        if (!gameOver && roundActive && idx === targetIndex) border = "rgba(255,255,255,0.95)";
         ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.stroke();
     });
 }
 
-// ---------- Drawing: triangle next to target button (bigger + new positions) ----------
+// ---------- Draw: triangle (bigger; positions you requested) ----------
 function drawTriangleIndicator() {
     if (!roundActive) return;
 
@@ -211,14 +214,13 @@ function drawTriangleIndicator() {
     const x = resolve(btn.x);
     const y = resolve(btn.y);
 
-    const size = 36;   // 2x bigger (was 18)
-    const gap  = 12;   // distance from button edge
+    const size = 36; // bigger
+    const gap  = 12;
 
-    // Place the triangle so its TIP is outside the button, pointing INTO it
     let tipX = x, tipY = y, angle = 0;
 
     if (btn.side === "top") {
-        // Triangle BELOW the top button, pointing UP toward it
+        // Triangle BELOW the top button, pointing UP
         tipX = x + btn.w / 2;
         tipY = y + btn.h + gap;
         angle = -Math.PI / 2; // up
@@ -238,15 +240,13 @@ function drawTriangleIndicator() {
     ctx.translate(tipX, tipY);
     ctx.rotate(angle);
 
-    // Slight shadow for visibility
     ctx.shadowColor = "rgba(0,0,0,0.5)";
     ctx.shadowBlur = 6;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 2;
 
-    // Draw filled triangle (tip at 0,0)
     ctx.beginPath();
-    ctx.moveTo(0, 0);               // tip toward the button
+    ctx.moveTo(0, 0);               // tip
     ctx.lineTo(-size,  size / 1.6);
     ctx.lineTo(-size, -size / 1.6);
     ctx.closePath();
@@ -256,7 +256,57 @@ function drawTriangleIndicator() {
     ctx.restore();
 }
 
-// ---------- Original actions (used if GAME_MODE is false) ----------
+// ---------- HUD: hearts ----------
+function drawHearts() {
+    const x0 = 12, y0 = 12, gap = 10, size = 16;
+    for (let i = 0; i < MAX_HP; i++) {
+        const filled = i < hp;
+        drawHeart(x0 + i * (size + gap), y0, size, filled);
+    }
+}
+function drawHeart(x: number, y: number, size: number, filled: boolean) {
+    const w = size, h = size * 0.9;
+    const cx1 = x + w * 0.25, cx2 = x + w * 0.75, cy = y + h * 0.35;
+    const bottomX = x + w * 0.5, bottomY = y + h;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(bottomX, bottomY);
+    ctx.bezierCurveTo(x + w, y + h * 0.7, x + w * 0.9, y + h * 0.2, cx2, cy);
+    ctx.arc(cx2, cy, w * 0.25, 0, Math.PI, true);
+    ctx.arc(cx1, cy, w * 0.25, 0, Math.PI, true);
+    ctx.bezierCurveTo(x + w * 0.1, y + h * 0.2, x, y + h * 0.7, bottomX, bottomY);
+    ctx.closePath();
+
+    if (filled) {
+        ctx.fillStyle = "rgba(255,70,90,0.95)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    } else {
+        ctx.strokeStyle = "rgba(255,255,255,0.45)";
+    }
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+}
+
+// ---------- GAME OVER overlay (now NOT mirrored) ----------
+function drawGameOver() {
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.font = "bold 48px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+    ctx.fillStyle = "white";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2);
+    ctx.font = "16px system-ui, sans-serif";
+    ctx.fillText("Refresh to play again", canvas.width / 2, canvas.height / 2 + 40);
+    ctx.restore();
+}
+
+// ---------- (Optional) original actions if GAME_MODE=false ----------
 function triggerAction(action: Button["action"]) {
     if (action === "capture") {
         lastCaptureCanvas = createCaptureToGallery();
