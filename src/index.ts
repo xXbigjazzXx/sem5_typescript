@@ -34,8 +34,10 @@ const BTN_COLOR = "rgba(220,220,220,0.32)";
 const BTN_BORDER = "rgba(255,255,255,0.65)";
 const BTN_RADIUS = 12;
 
+type Side = "top" | "left" | "right";
 type Button = {
     action: "capture" | "grayscale" | "save";
+    side: Side; // where the triangle is positioned relative to this button
     w: number;
     h: number;
     x: number | (() => number);
@@ -43,18 +45,18 @@ type Button = {
 };
 
 const buttons: Button[] = [
-    // Top (centered) -> CAPTURE
-    { action: "capture",   w: BUTTON_SIZE, h: BUTTON_SIZE,
+    // Top (centered)
+    { action: "capture",   side: "top",   w: BUTTON_SIZE, h: BUTTON_SIZE,
         x: () => (canvas.width - BUTTON_SIZE) / 2,
         y: () => BUTTON_PADDING },
 
-    // Left (second row) -> GRAYSCALE LAST
-    { action: "grayscale", w: BUTTON_SIZE, h: BUTTON_SIZE,
+    // Left (second row)
+    { action: "grayscale", side: "left",  w: BUTTON_SIZE, h: BUTTON_SIZE,
         x: () => BUTTON_PADDING,
         y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP },
 
-    // Right (second row) -> SAVE LAST
-    { action: "save",      w: BUTTON_SIZE, h: BUTTON_SIZE,
+    // Right (second row)
+    { action: "save",      side: "right", w: BUTTON_SIZE, h: BUTTON_SIZE,
         x: () => canvas.width - BUTTON_PADDING - BUTTON_SIZE,
         y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP },
 ];
@@ -124,8 +126,8 @@ function processFrame() {
     }
 
     // Visuals
-    drawVirtualButtons();
-    drawTriangleIndicator(); // triangle pointing to target
+    drawVirtualButtons();      // buttons only (no icons/labels)
+    drawTriangleIndicator();   // triangle next to target
 
     // Game timing transitions
     maybeAdvanceGameClock();
@@ -171,16 +173,7 @@ function checkVirtualButtons(diff: Uint8ClampedArray) {
             hitRecorded = true; // user hit the correct button during the 2s window
         }
 
-        // If you want to ALSO trigger the original actions while playing, uncomment:
-        /*
-        if (!GAME_MODE && ratio > 0.15) {
-          const now = performance.now();
-          if (!lastTriggerAt[btn.action] || now - lastTriggerAt[btn.action] > COOLDOWN_MS) {
-            lastTriggerAt[btn.action] = now;
-            triggerAction(btn.action);
-          }
-        }
-        */
+        // To also trigger original actions while playing, you could add that here.
     });
 }
 
@@ -199,7 +192,7 @@ function drawVirtualButtons() {
             fill = flashColor === "success" ? "rgba(38,201,64,0.45)" : "rgba(230,67,67,0.45)";
         }
 
-        // Draw rounded rect
+        // Draw rounded rect (no icons/labels)
         roundRect(ctx, x, y, btn.w, btn.h, BTN_RADIUS);
         ctx.fillStyle = fill; ctx.fill();
 
@@ -207,52 +200,59 @@ function drawVirtualButtons() {
         let border = BTN_BORDER;
         if (roundActive && idx === targetIndex) border = "rgba(255,255,255,0.95)";
         ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.stroke();
-
-        // Icon
-        if (btn.action === "capture") drawIconCapture(ctx, x, y, btn.w, btn.h);
-        else if (btn.action === "grayscale") drawIconGrayscale(ctx, x, y, btn.w, btn.h);
-        else if (btn.action === "save") drawIconSave(ctx, x, y, btn.w, btn.h);
     });
 }
 
-// ---------- Drawing: triangle indicator ----------
+// ---------- Drawing: triangle next to target button (bigger + new positions) ----------
 function drawTriangleIndicator() {
     if (!roundActive) return;
 
-    // Triangle anchor near the top center (a bit above the top button)
-    const anchorX = canvas.width / 2;
-    const anchorY = Math.max(10, BUTTON_PADDING - 10);
+    const btn = buttons[targetIndex];
+    const x = resolve(btn.x);
+    const y = resolve(btn.y);
 
-    // Point toward the center of the target button
-    const tb = buttons[targetIndex];
-    const tx = resolve(tb.x) + tb.w / 2;
-    const ty = resolve(tb.y) + tb.h / 2;
+    const size = 36;   // 2x bigger (was 18)
+    const gap  = 12;   // distance from button edge
 
-    const angle = Math.atan2(ty - anchorY, tx - anchorX);
+    // Place the triangle so its TIP is outside the button, pointing INTO it
+    let tipX = x, tipY = y, angle = 0;
 
-    const size = 18; // triangle size
+    if (btn.side === "top") {
+        // Triangle BELOW the top button, pointing UP toward it
+        tipX = x + btn.w / 2;
+        tipY = y + btn.h + gap;
+        angle = -Math.PI / 2; // up
+    } else if (btn.side === "left") {
+        // Triangle to the RIGHT of the left button, pointing LEFT
+        tipX = x + btn.w + gap;
+        tipY = y + btn.h / 2;
+        angle = Math.PI; // left
+    } else if (btn.side === "right") {
+        // Triangle to the LEFT of the right button, pointing RIGHT
+        tipX = x - gap;
+        tipY = y + btn.h / 2;
+        angle = 0; // right
+    }
+
     ctx.save();
-    ctx.translate(anchorX, anchorY);
+    ctx.translate(tipX, tipY);
     ctx.rotate(angle);
 
+    // Slight shadow for visibility
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 2;
+
+    // Draw filled triangle (tip at 0,0)
     ctx.beginPath();
-    ctx.moveTo(0, 0);           // tip
-    ctx.lineTo(-size, size / 1.6);
+    ctx.moveTo(0, 0);               // tip toward the button
+    ctx.lineTo(-size,  size / 1.6);
     ctx.lineTo(-size, -size / 1.6);
     ctx.closePath();
     ctx.fillStyle = "rgba(255,255,255,0.95)";
     ctx.fill();
-    ctx.restore();
 
-    // Optional dotted line from tip to target (subtle)
-    ctx.save();
-    ctx.setLineDash([6, 6]);
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(anchorX, anchorY);
-    ctx.lineTo(tx, ty);
-    ctx.stroke();
     ctx.restore();
 }
 
@@ -328,71 +328,6 @@ function roundRect(
     ctx.arcTo(x, y + h, x, y, rr);
     ctx.arcTo(x, y, x + w, y, rr);
     ctx.closePath();
-}
-
-function drawIconCapture(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-    ctx.save();
-    const cx = x + w/2, cy = y + h/2;
-    const rOuter = Math.min(w, h) * 0.32;
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
-    ctx.stroke();
-    const s = Math.min(w, h) * 0.28;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx - s + 12, cy - s);
-    ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx + s - 12, cy - s);
-    ctx.moveTo(cx - s, cy + s); ctx.lineTo(cx - s + 12, cy + s);
-    ctx.moveTo(cx + s, cy + s); ctx.lineTo(cx + s - 12, cy + s);
-    ctx.stroke();
-    ctx.restore();
-}
-
-function drawIconGrayscale(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-    ctx.save();
-    const cx = x + w/2, cy = y + h/2;
-    const r = Math.min(w, h) * 0.32;
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, Math.PI/2, Math.PI*3/2);
-    ctx.lineTo(cx, cy - r);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    const sq = r * 0.4;
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.fillRect(cx + r*0.15 - sq/2, cy - sq/2, sq, sq);
-    ctx.restore();
-}
-
-function drawIconSave(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 3;
-    const cx = x + w/2, cy = y + h/2;
-    const aH = Math.min(w, h) * 0.22;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - aH);
-    ctx.lineTo(cx, cy + aH);
-    ctx.moveTo(cx - aH * 0.7, cy + aH * 0.2);
-    ctx.lineTo(cx, cy + aH);
-    ctx.lineTo(cx + aH * 0.7, cy + aH * 0.2);
-    ctx.stroke();
-    const tw = Math.min(w, h) * 0.6;
-    const th = Math.min(w, h) * 0.22;
-    ctx.beginPath();
-    ctx.rect(cx - tw/2, y + h - th - 14, tw, th);
-    ctx.stroke();
-    ctx.restore();
 }
 
 // ---------- Helpers ----------
