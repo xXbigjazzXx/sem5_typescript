@@ -30,6 +30,9 @@ let flashingTarget: number | null = null;
 let flashEndsAt = 0;
 let flashColor: "success" | "fail" | null = null;
 
+// New: only the **last** activated button counts when time runs out
+let lastActivatedIndex: number | null = null;
+
 // ---------- Buttons (Top / Left / Right) ----------
 const BUTTON_SIZE = 84;
 const BUTTON_PADDING = 16;
@@ -83,6 +86,7 @@ function startRound() {
     if (gameOver) return;
     roundActive = true;
     hitRecorded = false;
+    lastActivatedIndex = null; // reset the "last touched" for the new round
     targetIndex = Math.floor(Math.random() * buttons.length);
     roundEndsAt = performance.now() + ROUND_MS;
     flashingTarget = null;
@@ -91,10 +95,15 @@ function startRound() {
 
 function endRound() {
     roundActive = false;
+
+    // Success ONLY if the last activated button matches the target
+    hitRecorded = (lastActivatedIndex === targetIndex);
+
     flashingTarget = targetIndex;
     flashColor = hitRecorded ? "success" : "fail";
     flashEndsAt = performance.now() + FLASH_MS;
 
+    // Lose a life if failed
     if (!hitRecorded) {
         hp = Math.max(0, hp - 1);
         if (hp === 0) gameOver = true;
@@ -118,7 +127,7 @@ function processFrame() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    // 1) Draw the VIDEO MIRRORED (selfie) ***only this step is mirrored***
+    // 1) Draw the VIDEO MIRRORED (selfie) — only the video is mirrored
     ctx.save();
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
@@ -128,13 +137,13 @@ function processFrame() {
     // Read the mirrored frame for motion detection
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    // 2) Motion detection (uses the mirrored image so it matches what the user sees)
+    // 2) Motion detection (mirrored frame matches what user sees)
     if (previousFrame) {
         const diff = detectMotion(previousFrame, currentFrame);
         if (!gameOver) checkVirtualButtons(diff);
     }
 
-    // 3) Draw UI/HUD in NORMAL orientation (not mirrored)
+    // 3) Draw HUD/UI in normal orientation (not mirrored)
     drawVirtualButtons();
     if (!gameOver) drawTriangleIndicator();
     drawHearts();
@@ -162,8 +171,11 @@ function detectMotion(prev: ImageData, curr: ImageData): Uint8ClampedArray {
     return diff;
 }
 
-// ---------- Button hit test ----------
+// ---------- Button hit test: only track the "last touched" ----------
 function checkVirtualButtons(diff: Uint8ClampedArray) {
+    const THRESHOLD = 0.15;
+    let frameLast: number | null = null;
+
     buttons.forEach((btn, idx) => {
         const x = resolve(btn.x);
         const y = resolve(btn.y);
@@ -178,11 +190,15 @@ function checkVirtualButtons(diff: Uint8ClampedArray) {
         }
 
         const ratio = motionCount / totalPixels;
-
-        if (GAME_MODE && roundActive && idx === targetIndex && ratio > 0.15) {
-            hitRecorded = true;
+        if (roundActive && ratio > THRESHOLD) {
+            frameLast = idx; // track the most recent active button in this frame
         }
     });
+
+    // If any button was active this frame, that becomes the round's "last activation"
+    if (frameLast !== null) {
+        lastActivatedIndex = frameLast;
+    }
 }
 
 // ---------- Draw: buttons ----------
@@ -193,20 +209,33 @@ function drawVirtualButtons() {
         const y = resolve(btn.y);
 
         let fill = BTN_COLOR;
+
+        // During flash window, tint the target button green/red
         if (!roundActive && flashingTarget === idx && now < flashEndsAt) {
             fill = flashColor === "success" ? "rgba(38,201,64,0.45)" : "rgba(230,67,67,0.45)";
         }
 
+        // Draw rounded rect (no icons/labels)
         roundRect(ctx, x, y, btn.w, btn.h, BTN_RADIUS);
-        ctx.fillStyle = fill; ctx.fill();
+        ctx.fillStyle = fill;
+        ctx.fill();
 
+        // Border: brighten the active target during the round
         let border = BTN_BORDER;
         if (!gameOver && roundActive && idx === targetIndex) border = "rgba(255,255,255,0.95)";
-        ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = border;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Optional: subtle overlay showing which button is currently "locked" as lastActivation
+        if (roundActive && lastActivatedIndex === idx) {
+            ctx.fillStyle = "rgba(255,255,255,0.12)";
+            ctx.fill();
+        }
     });
 }
 
-// ---------- Draw: triangle (bigger; positions you requested) ----------
+// ---------- Draw: triangle (bigger; positions requested) ----------
 function drawTriangleIndicator() {
     if (!roundActive) return;
 
@@ -290,7 +319,7 @@ function drawHeart(x: number, y: number, size: number, filled: boolean) {
     ctx.restore();
 }
 
-// ---------- GAME OVER overlay (now NOT mirrored) ----------
+// ---------- GAME OVER overlay ----------
 function drawGameOver() {
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,0.45)";
