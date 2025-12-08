@@ -1,16 +1,36 @@
-// --- Elements
+// ---------- DOM ----------
 const video = document.getElementById("video") as HTMLVideoElement;
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 const gallery = document.getElementById("gallery") as HTMLDivElement;
 
-// --- State
+// ---------- State ----------
 let previousFrame: ImageData | null = null;
 let lastCaptureCanvas: HTMLCanvasElement | null = null;
+
 const lastTriggerAt: Record<string, number> = {};
 const COOLDOWN_MS = 600;
 
-// --- Buttons (Top / Left / Right) — light gray, rounded, no labels
+// Game settings
+const GAME_MODE = true;
+const ROUND_MS = 2000;   // player has 2 seconds
+const FLASH_MS = 500;    // flash success/fail for 0.5s
+
+// Lives / Game Over
+const MAX_HP = 3;
+let hp = MAX_HP;
+let gameOver = false;
+
+let roundActive = false;
+let roundEndsAt = 0;
+let targetIndex = 0;
+let hitRecorded = false;
+
+let flashingTarget: number | null = null;
+let flashEndsAt = 0;
+let flashColor: "success" | "fail" | null = null;
+
+// ---------- Buttons (Top / Left / Right) ----------
 const BUTTON_SIZE = 84;
 const BUTTON_PADDING = 16;
 const ROW_GAP = 12;
@@ -18,8 +38,10 @@ const BTN_COLOR = "rgba(220,220,220,0.32)";
 const BTN_BORDER = "rgba(255,255,255,0.65)";
 const BTN_RADIUS = 12;
 
+type Side = "top" | "left" | "right";
 type Button = {
     action: "capture" | "grayscale" | "save";
+    side: Side; // triangle positioning relative to this button
     w: number;
     h: number;
     x: number | (() => number);
@@ -27,67 +49,105 @@ type Button = {
 };
 
 const buttons: Button[] = [
-    // Top (centered) -> CAPTURE
-    {
-        action: "capture",
-        w: BUTTON_SIZE, h: BUTTON_SIZE,
+    // Top (centered)
+    { action: "capture",   side: "top",   w: BUTTON_SIZE, h: BUTTON_SIZE,
         x: () => (canvas.width - BUTTON_SIZE) / 2,
-        y: () => BUTTON_PADDING
-    },
-    // Left (second row) -> GRAYSCALE LAST
-    {
-        action: "grayscale",
-        w: BUTTON_SIZE, h: BUTTON_SIZE,
+        y: () => BUTTON_PADDING },
+
+    // Left (second row)
+    { action: "grayscale", side: "left",  w: BUTTON_SIZE, h: BUTTON_SIZE,
         x: () => BUTTON_PADDING,
-        y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP
-    },
-    // Right (second row) -> SAVE LAST
-    {
-        action: "save",
-        w: BUTTON_SIZE, h: BUTTON_SIZE,
+        y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP },
+
+    // Right (second row)
+    { action: "save",      side: "right", w: BUTTON_SIZE, h: BUTTON_SIZE,
         x: () => canvas.width - BUTTON_PADDING - BUTTON_SIZE,
-        y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP
-    },
+        y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP },
 ];
 
-// --- Camera
+// ---------- Camera ----------
 async function startCamera() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
         await video.play();
+        startRound();
         requestAnimationFrame(processFrame);
     } catch (err) {
         console.error("Camera error:", err);
     }
 }
 
-// --- Main loop
+// ---------- Game flow ----------
+function startRound() {
+    if (gameOver) return;
+    roundActive = true;
+    hitRecorded = false;
+    targetIndex = Math.floor(Math.random() * buttons.length);
+    roundEndsAt = performance.now() + ROUND_MS;
+    flashingTarget = null;
+    flashColor = null;
+}
+
+function endRound() {
+    roundActive = false;
+    flashingTarget = targetIndex;
+    flashColor = hitRecorded ? "success" : "fail";
+    flashEndsAt = performance.now() + FLASH_MS;
+
+    if (!hitRecorded) {
+        hp = Math.max(0, hp - 1);
+        if (hp === 0) gameOver = true;
+    }
+}
+
+function maybeAdvanceGameClock() {
+    const now = performance.now();
+    if (!gameOver && roundActive && now >= roundEndsAt) endRound();
+    if (!gameOver && !roundActive && flashingTarget !== null && now >= flashEndsAt) startRound();
+}
+
+// ---------- Main loop ----------
 function processFrame() {
     if (video.videoWidth === 0) {
         requestAnimationFrame(processFrame);
         return;
     }
 
-    // Match canvas to video size
+    // Canvas size
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    // Draw live frame
+    // 1) Draw the VIDEO MIRRORED (selfie) ***only this step is mirrored***
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    // Read the mirrored frame for motion detection
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
+    // 2) Motion detection (uses the mirrored image so it matches what the user sees)
     if (previousFrame) {
         const diff = detectMotion(previousFrame, currentFrame);
-        checkVirtualButtons(diff);
+        if (!gameOver) checkVirtualButtons(diff);
     }
 
+    // 3) Draw UI/HUD in NORMAL orientation (not mirrored)
     drawVirtualButtons();
+    if (!gameOver) drawTriangleIndicator();
+    drawHearts();
+    if (gameOver) drawGameOver();
+
+    // Game timing transitions
+    if (!gameOver) maybeAdvanceGameClock();
+
     previousFrame = currentFrame;
     requestAnimationFrame(processFrame);
 }
 
-// --- Motion detection (simple frame diff)
+// ---------- Motion detection ----------
 function detectMotion(prev: ImageData, curr: ImageData): Uint8ClampedArray {
     const diff = new Uint8ClampedArray(curr.data.length);
     for (let i = 0; i < curr.data.length; i += 4) {
@@ -102,54 +162,151 @@ function detectMotion(prev: ImageData, curr: ImageData): Uint8ClampedArray {
     return diff;
 }
 
-// --- Buttons: draw (rounded, with icons)
-function drawVirtualButtons() {
-    ctx.save();
-    buttons.forEach(btn => {
-        const x = resolve(btn.x);
-        const y = resolve(btn.y);
-
-        // fill + border
-        roundRect(ctx, x, y, btn.w, btn.h, BTN_RADIUS);
-        ctx.fillStyle = BTN_COLOR; ctx.fill();
-        ctx.strokeStyle = BTN_BORDER; ctx.lineWidth = 2; ctx.stroke();
-
-        // icon
-        if (btn.action === "capture") drawIconCapture(ctx, x, y, btn.w, btn.h);
-        else if (btn.action === "grayscale") drawIconGrayscale(ctx, x, y, btn.w, btn.h);
-        else if (btn.action === "save") drawIconSave(ctx, x, y, btn.w, btn.h);
-    });
-    ctx.restore();
-}
-
-// --- Buttons: detect activation
+// ---------- Button hit test ----------
 function checkVirtualButtons(diff: Uint8ClampedArray) {
-    buttons.forEach(btn => {
+    buttons.forEach((btn, idx) => {
         const x = resolve(btn.x);
         const y = resolve(btn.y);
-
         let motionCount = 0;
         const totalPixels = btn.w * btn.h;
 
         for (let j = y; j < y + btn.h; j++) {
             for (let i = x; i < x + btn.w; i++) {
-                const idx = (j * canvas.width + i) * 4;
-                if (diff[idx] > 128) motionCount++;
+                const di = (j * canvas.width + i) * 4;
+                if (diff[di] > 128) motionCount++;
             }
         }
 
         const ratio = motionCount / totalPixels;
-        if (ratio > 0.15) {
-            const now = performance.now();
-            if (!lastTriggerAt[btn.action] || now - lastTriggerAt[btn.action] > COOLDOWN_MS) {
-                lastTriggerAt[btn.action] = now;
-                triggerAction(btn.action);
-            }
+
+        if (GAME_MODE && roundActive && idx === targetIndex && ratio > 0.15) {
+            hitRecorded = true;
         }
     });
 }
 
-// --- Actions operate on captures (not live feed)
+// ---------- Draw: buttons ----------
+function drawVirtualButtons() {
+    const now = performance.now();
+    buttons.forEach((btn, idx) => {
+        const x = resolve(btn.x);
+        const y = resolve(btn.y);
+
+        let fill = BTN_COLOR;
+        if (!roundActive && flashingTarget === idx && now < flashEndsAt) {
+            fill = flashColor === "success" ? "rgba(38,201,64,0.45)" : "rgba(230,67,67,0.45)";
+        }
+
+        roundRect(ctx, x, y, btn.w, btn.h, BTN_RADIUS);
+        ctx.fillStyle = fill; ctx.fill();
+
+        let border = BTN_BORDER;
+        if (!gameOver && roundActive && idx === targetIndex) border = "rgba(255,255,255,0.95)";
+        ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.stroke();
+    });
+}
+
+// ---------- Draw: triangle (bigger; positions you requested) ----------
+function drawTriangleIndicator() {
+    if (!roundActive) return;
+
+    const btn = buttons[targetIndex];
+    const x = resolve(btn.x);
+    const y = resolve(btn.y);
+
+    const size = 36; // bigger
+    const gap  = 12;
+
+    let tipX = x, tipY = y, angle = 0;
+
+    if (btn.side === "top") {
+        // Triangle BELOW the top button, pointing UP
+        tipX = x + btn.w / 2;
+        tipY = y + btn.h + gap;
+        angle = -Math.PI / 2; // up
+    } else if (btn.side === "left") {
+        // Triangle to the RIGHT of the left button, pointing LEFT
+        tipX = x + btn.w + gap;
+        tipY = y + btn.h / 2;
+        angle = Math.PI; // left
+    } else if (btn.side === "right") {
+        // Triangle to the LEFT of the right button, pointing RIGHT
+        tipX = x - gap;
+        tipY = y + btn.h / 2;
+        angle = 0; // right
+    }
+
+    ctx.save();
+    ctx.translate(tipX, tipY);
+    ctx.rotate(angle);
+
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 2;
+
+    ctx.beginPath();
+    ctx.moveTo(0, 0);               // tip
+    ctx.lineTo(-size,  size / 1.6);
+    ctx.lineTo(-size, -size / 1.6);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// ---------- HUD: hearts ----------
+function drawHearts() {
+    const x0 = 12, y0 = 12, gap = 10, size = 16;
+    for (let i = 0; i < MAX_HP; i++) {
+        const filled = i < hp;
+        drawHeart(x0 + i * (size + gap), y0, size, filled);
+    }
+}
+function drawHeart(x: number, y: number, size: number, filled: boolean) {
+    const w = size, h = size * 0.9;
+    const cx1 = x + w * 0.25, cx2 = x + w * 0.75, cy = y + h * 0.35;
+    const bottomX = x + w * 0.5, bottomY = y + h;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(bottomX, bottomY);
+    ctx.bezierCurveTo(x + w, y + h * 0.7, x + w * 0.9, y + h * 0.2, cx2, cy);
+    ctx.arc(cx2, cy, w * 0.25, 0, Math.PI, true);
+    ctx.arc(cx1, cy, w * 0.25, 0, Math.PI, true);
+    ctx.bezierCurveTo(x + w * 0.1, y + h * 0.2, x, y + h * 0.7, bottomX, bottomY);
+    ctx.closePath();
+
+    if (filled) {
+        ctx.fillStyle = "rgba(255,70,90,0.95)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    } else {
+        ctx.strokeStyle = "rgba(255,255,255,0.45)";
+    }
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+}
+
+// ---------- GAME OVER overlay (now NOT mirrored) ----------
+function drawGameOver() {
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.font = "bold 48px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+    ctx.fillStyle = "white";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2);
+    ctx.font = "16px system-ui, sans-serif";
+    ctx.fillText("Refresh to play again", canvas.width / 2, canvas.height / 2 + 40);
+    ctx.restore();
+}
+
+// ---------- (Optional) original actions if GAME_MODE=false ----------
 function triggerAction(action: Button["action"]) {
     if (action === "capture") {
         lastCaptureCanvas = createCaptureToGallery();
@@ -165,17 +322,15 @@ function triggerAction(action: Button["action"]) {
     }
 }
 
-// --- Gallery helpers
+// ---------- Gallery helpers ----------
 function createCaptureToGallery(): HTMLCanvasElement {
     const w = video.videoWidth, h = video.videoHeight;
 
-    // wrapper
     const wrap = document.createElement("div");
     wrap.className = "thumb latest";
     const prevLatest = gallery.querySelector(".thumb.latest");
     if (prevLatest) prevLatest.classList.remove("latest");
 
-    // canvas for persistent capture
     const c = document.createElement("canvas");
     c.width = w; c.height = h;
     const cctx = c.getContext("2d")!;
@@ -189,7 +344,6 @@ function createCaptureToGallery(): HTMLCanvasElement {
     wrap.appendChild(meta);
     gallery.prepend(wrap);
 
-    // allow selecting a different "latest" by click
     c.addEventListener("click", () => {
         const old = gallery.querySelector(".thumb.latest");
         if (old) old.classList.remove("latest");
@@ -211,7 +365,7 @@ function grayscaleCanvas(target: HTMLCanvasElement) {
     gctx.putImageData(img, 0, 0);
 }
 
-// --- Drawing utilities
+// ---------- Drawing utilities ----------
 function roundRect(
     ctx: CanvasRenderingContext2D,
     x: number, y: number, w: number, h: number, r: number
@@ -226,83 +380,10 @@ function roundRect(
     ctx.closePath();
 }
 
-function drawIconCapture(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-    ctx.save();
-    const cx = x + w/2, cy = y + h/2;
-    const rOuter = Math.min(w, h) * 0.32;
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // small "viewfinder" notches
-    const s = Math.min(w, h) * 0.28;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx - s + 12, cy - s);
-    ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx + s - 12, cy - s);
-    ctx.moveTo(cx - s, cy + s); ctx.lineTo(cx - s + 12, cy + s);
-    ctx.moveTo(cx + s, cy + s); ctx.lineTo(cx + s - 12, cy + s);
-    ctx.stroke();
-    ctx.restore();
-}
-
-function drawIconGrayscale(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-    ctx.save();
-    const cx = x + w/2, cy = y + h/2;
-    const r = Math.min(w, h) * 0.32;
-
-    // Left half filled, right half outlined -> conveys "grayscale"
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, Math.PI/2, Math.PI*3/2);
-    ctx.lineTo(cx, cy - r);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // small checker hint
-    const sq = r * 0.4;
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.fillRect(cx + r*0.15 - sq/2, cy - sq/2, sq, sq);
-    ctx.restore();
-}
-
-function drawIconSave(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 3;
-    const cx = x + w/2, cy = y + h/2;
-
-    // Arrow down
-    const aH = Math.min(w, h) * 0.22;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - aH);
-    ctx.lineTo(cx, cy + aH);
-    ctx.moveTo(cx - aH * 0.7, cy + aH * 0.2);
-    ctx.lineTo(cx, cy + aH);
-    ctx.lineTo(cx + aH * 0.7, cy + aH * 0.2);
-    ctx.stroke();
-
-    // Tray
-    const tw = Math.min(w, h) * 0.6;
-    const th = Math.min(w, h) * 0.22;
-    ctx.beginPath();
-    ctx.rect(cx - tw/2, y + h - th - 14, tw, th);
-    ctx.stroke();
-    ctx.restore();
-}
-
-// --- Helpers
+// ---------- Helpers ----------
 function resolve(v: number | (() => number)): number {
     return (typeof v === "function") ? v() : v;
 }
 
-// Kick off
+// ---------- Start ----------
 startCamera();
