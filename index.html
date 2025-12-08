@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Webcam Virtual Buttons + Captures</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; background: #0f1115; color: #eaeaea; font-family: system-ui, sans-serif; }
+    .page { display: grid; gap: 16px; padding: 16px; max-width: 1100px; margin: 0 auto; }
+    .frame {
+      position: relative; overflow: hidden; border-radius: 12px;
+      background: #111520; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      max-width: 100%;
+    }
+    video { display: none; width: 100%; height: auto; transform: scaleX(-1); } /* set to block if you want to see video */
+    canvas#canvas { width: 100%; height: auto; transform: scaleX(-1); image-rendering: crisp-edges; }
+    .hint { opacity: .7; font-size: 14px; }
+
+    .gallery {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+    }
+    .thumb {
+      background: #121826; border: 1px solid #1b2130; border-radius: 10px; padding: 8px;
+      display: grid; gap: 8px; place-items: center;
+    }
+    .thumb canvas {
+      max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 6px 16px rgba(0,0,0,.3);
+    }
+    .thumb .meta { font-size: 12px; opacity: .75; }
+    .thumb.latest { outline: 2px solid #4f8cff; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="frame">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
+  <p class="hint">Allow camera access. Reach into the translucent squares to <strong>Capture</strong> (left) or <strong>Grayscale</strong> the <em>latest capture</em> (right).</p>
+
+  <section>
+    <h3>Captures</h3>
+    <div id="gallery" class="gallery"></div>
+  </section>
+</div>
+
+<!-- Point this to your compiled JS (e.g., /dist/app.js) -->
+<script type="module" src="/src/index.ts"></script>
+</body>
+</html>
