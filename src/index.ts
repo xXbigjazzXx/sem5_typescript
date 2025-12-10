@@ -30,7 +30,7 @@ let flashingTarget: number | null = null;
 let flashEndsAt = 0;
 let flashColor: "success" | "fail" | null = null;
 
-// New: only the **last** activated button counts when time runs out
+// only the **last** activated button counts when time runs out
 let lastActivatedIndex: number | null = null;
 
 // ---------- Buttons (Top / Left / Right) ----------
@@ -68,15 +68,8 @@ const buttons: Button[] = [
         y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP },
 ];
 
-// ----- Load Images -----
-const imgTop = new Image();
-imgTop.src = "assets/Oben.png";
 
-const imgLeft = new Image();
-imgLeft.src = "assets/Links.png";
 
-const imgRight = new Image();
-imgRight.src = "assets/Rechts.png";
 
 // ---------- Knight Images ----------
 const knightTop = new Image();
@@ -88,16 +81,19 @@ knightLeft.src = "assets/Links.png";
 const knightRight = new Image();
 knightRight.src = "assets/Rechts.png";
 
+const knightNeutral = new Image();
+knightNeutral.src = "assets/Neutral.png";
+
 // ---------- Choose correct pose ----------
 function getKnightPose(): HTMLImageElement {
-    if (!roundActive) return knightLeft; // default when no round active
+    if (!roundActive) return knightNeutral; // default when no round active
 
     const side = buttons[targetIndex].side;
     if (side === "top")  return knightTop;
     if (side === "left") return knightLeft;
     if (side === "right") return knightRight;
 
-    return knightLeft;
+    return knightNeutral;
 }
 
 // ---------- Draw knight background ----------
@@ -189,13 +185,13 @@ function processFrame() {
     // Draw knight depending on target button (not mirrored)
     drawKnightBackground();
 
-    // 2) Motion detection (mirrored frame matches what user sees)
+    // Motion detection (mirrored frame matches what user sees)
     if (previousFrame) {
         const diff = detectMotion(previousFrame, currentFrame);
         if (!gameOver) checkVirtualButtons(diff);
     }
 
-    // 3) Draw HUD/UI in normal orientation (not mirrored)
+    // Draw HUD/UI in normal orientation (not mirrored)
     drawVirtualButtons();
     if (!gameOver) drawTriangleIndicator();
     drawHearts();
@@ -279,7 +275,7 @@ function drawVirtualButtons() {
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Optional: subtle overlay showing which button is currently "locked" as lastActivation
+        // subtle overlay showing which button is currently "locked" as lastActivation
         if (roundActive && lastActivatedIndex === idx) {
             ctx.fillStyle = "rgba(255,255,255,0.12)";
             ctx.fill();
