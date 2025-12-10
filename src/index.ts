@@ -68,6 +68,55 @@ const buttons: Button[] = [
         y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP },
 ];
 
+// ----- Load Images -----
+const imgTop = new Image();
+imgTop.src = "assets/Oben.png";
+
+const imgLeft = new Image();
+imgLeft.src = "assets/Links.png";
+
+const imgRight = new Image();
+imgRight.src = "assets/Rechts.png";
+
+// ---------- Knight Images ----------
+const knightTop = new Image();
+knightTop.src = "assets/Oben.png";
+
+const knightLeft = new Image();
+knightLeft.src = "assets/Links.png";
+
+const knightRight = new Image();
+knightRight.src = "assets/Rechts.png";
+
+// ---------- Choose correct pose ----------
+function getKnightPose(): HTMLImageElement {
+    if (!roundActive) return knightLeft; // default when no round active
+
+    const side = buttons[targetIndex].side;
+    if (side === "top")  return knightTop;
+    if (side === "left") return knightLeft;
+    if (side === "right") return knightRight;
+
+    return knightLeft;
+}
+
+// ---------- Draw knight background ----------
+function drawKnightBackground() {
+    const img = getKnightPose();
+
+    const scale = 1.3;
+    const w = canvas.width * scale;
+    const h = canvas.height * scale;
+
+    const x = (canvas.width - w) / 2;
+    const y = (canvas.height - h) / 2;
+
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(img, x, y, w, h);
+    ctx.restore();
+}
+
 // ---------- Camera ----------
 async function startCamera() {
     try {
@@ -136,6 +185,9 @@ function processFrame() {
 
     // Read the mirrored frame for motion detection
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Draw knight depending on target button (not mirrored)
+    drawKnightBackground();
 
     // 2) Motion detection (mirrored frame matches what user sees)
     if (previousFrame) {
