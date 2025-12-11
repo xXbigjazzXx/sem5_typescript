@@ -30,7 +30,7 @@ let flashingTarget: number | null = null;
 let flashEndsAt = 0;
 let flashColor: "success" | "fail" | null = null;
 
-// New: only the **last** activated button counts when time runs out
+// only the **last** activated button counts when time runs out
 let lastActivatedIndex: number | null = null;
 
 // ---------- Buttons (Top / Left / Right) ----------
@@ -67,6 +67,51 @@ const buttons: Button[] = [
         x: () => canvas.width - BUTTON_PADDING - BUTTON_SIZE,
         y: () => BUTTON_PADDING + BUTTON_SIZE + ROW_GAP },
 ];
+
+
+
+
+// ---------- Knight Images ----------
+const knightTop = new Image();
+knightTop.src = "assets/Oben.png";
+
+const knightLeft = new Image();
+knightLeft.src = "assets/Links.png";
+
+const knightRight = new Image();
+knightRight.src = "assets/Rechts.png";
+
+const knightNeutral = new Image();
+knightNeutral.src = "assets/Neutral.png";
+
+// ---------- Choose correct pose ----------
+function getKnightPose(): HTMLImageElement {
+    if (!roundActive) return knightNeutral; // default when no round active
+
+    const side = buttons[targetIndex].side;
+    if (side === "top")  return knightTop;
+    if (side === "left") return knightLeft;
+    if (side === "right") return knightRight;
+
+    return knightNeutral;
+}
+
+// ---------- Draw knight background ----------
+function drawKnightBackground() {
+    const img = getKnightPose();
+
+    const scale = 1.3;
+    const w = canvas.width * scale;
+    const h = canvas.height * scale;
+
+    const x = (canvas.width - w) / 2;
+    const y = (canvas.height - h) / 2;
+
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(img, x, y, w, h);
+    ctx.restore();
+}
 
 // ---------- Camera ----------
 async function startCamera() {
@@ -137,13 +182,16 @@ function processFrame() {
     // Read the mirrored frame for motion detection
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    // 2) Motion detection (mirrored frame matches what user sees)
+    // Draw knight depending on target button (not mirrored)
+    drawKnightBackground();
+
+    // Motion detection (mirrored frame matches what user sees)
     if (previousFrame) {
         const diff = detectMotion(previousFrame, currentFrame);
         if (!gameOver) checkVirtualButtons(diff);
     }
 
-    // 3) Draw HUD/UI in normal orientation (not mirrored)
+    // Draw HUD/UI in normal orientation (not mirrored)
     drawVirtualButtons();
     if (!gameOver) drawTriangleIndicator();
     drawHearts();
@@ -227,7 +275,7 @@ function drawVirtualButtons() {
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Optional: subtle overlay showing which button is currently "locked" as lastActivation
+        // subtle overlay showing which button is currently "locked" as lastActivation
         if (roundActive && lastActivatedIndex === idx) {
             ctx.fillStyle = "rgba(255,255,255,0.12)";
             ctx.fill();
