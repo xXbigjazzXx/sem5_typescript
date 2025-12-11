@@ -1,10 +1,10 @@
-// ---------- DOM ----------
+// ---------- DOM
 const video = document.getElementById("video") as HTMLVideoElement;
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
 const gallery = document.getElementById("gallery") as HTMLDivElement;
 
-// ---------- State ----------
+// ---------- State
 let previousFrame: ImageData | null = null;
 let lastCaptureCanvas: HTMLCanvasElement | null = null;
 
@@ -30,10 +30,9 @@ let flashingTarget: number | null = null;
 let flashEndsAt = 0;
 let flashColor: "success" | "fail" | null = null;
 
-// only the **last** activated button counts when time runs out
 let lastActivatedIndex: number | null = null;
 
-// ---------- Buttons (Top / Left / Right) ----------
+// ---------- Buttons
 const BUTTON_SIZE = 84;
 const BUTTON_PADDING = 16;
 const ROW_GAP = 12;
@@ -71,7 +70,7 @@ const buttons: Button[] = [
 
 
 
-// ---------- Knight Images ----------
+// ---------- Knight Images
 const knightTop = new Image();
 knightTop.src = "assets/Oben.png";
 
@@ -84,7 +83,7 @@ knightRight.src = "assets/Rechts.png";
 const knightNeutral = new Image();
 knightNeutral.src = "assets/Neutral.png";
 
-// ---------- Choose correct pose ----------
+// ---------- Choose correct pose
 function getKnightPose(): HTMLImageElement {
     if (!roundActive) return knightNeutral; // default when no round active
 
@@ -96,7 +95,7 @@ function getKnightPose(): HTMLImageElement {
     return knightNeutral;
 }
 
-// ---------- Draw knight background ----------
+// ---------- Draw knight background
 function drawKnightBackground() {
     const img = getKnightPose();
 
@@ -113,7 +112,7 @@ function drawKnightBackground() {
     ctx.restore();
 }
 
-// ---------- Camera ----------
+// ---------- Camera
 async function startCamera() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -126,7 +125,7 @@ async function startCamera() {
     }
 }
 
-// ---------- Game flow ----------
+// ---------- Game flow
 function startRound() {
     if (gameOver) return;
     roundActive = true;
@@ -150,7 +149,7 @@ function endRound() {
 
     // Lose a life if failed
     if (!hitRecorded) {
-        hp = Math.max(0, hp - 1);
+        hp = hp-1;
         if (hp === 0) gameOver = true;
     }
 }
@@ -161,7 +160,7 @@ function maybeAdvanceGameClock() {
     if (!gameOver && !roundActive && flashingTarget !== null && now >= flashEndsAt) startRound();
 }
 
-// ---------- Main loop ----------
+// ---------- Main loop
 function processFrame() {
     if (video.videoWidth === 0) {
         requestAnimationFrame(processFrame);
@@ -172,7 +171,7 @@ function processFrame() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    // 1) Draw the VIDEO MIRRORED (selfie) — only the video is mirrored
+    // Draw the video mirrored
     ctx.save();
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
@@ -182,16 +181,16 @@ function processFrame() {
     // Read the mirrored frame for motion detection
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    // Draw knight depending on target button (not mirrored)
+    // Draw knight
     drawKnightBackground();
 
-    // Motion detection (mirrored frame matches what user sees)
+    // Motion detection
     if (previousFrame) {
         const diff = detectMotion(previousFrame, currentFrame);
         if (!gameOver) checkVirtualButtons(diff);
     }
 
-    // Draw HUD/UI in normal orientation (not mirrored)
+    // Draw HUD/UI
     drawVirtualButtons();
     if (!gameOver) drawTriangleIndicator();
     drawHearts();
@@ -204,7 +203,7 @@ function processFrame() {
     requestAnimationFrame(processFrame);
 }
 
-// ---------- Motion detection ----------
+// ---------- Motion detection
 function detectMotion(prev: ImageData, curr: ImageData): Uint8ClampedArray {
     const diff = new Uint8ClampedArray(curr.data.length);
     for (let i = 0; i < curr.data.length; i += 4) {
@@ -219,7 +218,7 @@ function detectMotion(prev: ImageData, curr: ImageData): Uint8ClampedArray {
     return diff;
 }
 
-// ---------- Button hit test: only track the "last touched" ----------
+// ---------- Button hit test
 function checkVirtualButtons(diff: Uint8ClampedArray) {
     const THRESHOLD = 0.15;
     let frameLast: number | null = null;
@@ -243,13 +242,12 @@ function checkVirtualButtons(diff: Uint8ClampedArray) {
         }
     });
 
-    // If any button was active this frame, that becomes the round's "last activation"
     if (frameLast !== null) {
         lastActivatedIndex = frameLast;
     }
 }
 
-// ---------- Draw: buttons ----------
+// ---------- Draw: buttons
 function drawVirtualButtons() {
     const now = performance.now();
     buttons.forEach((btn, idx) => {
@@ -263,7 +261,6 @@ function drawVirtualButtons() {
             fill = flashColor === "success" ? "rgba(38,201,64,0.45)" : "rgba(230,67,67,0.45)";
         }
 
-        // Draw rounded rect (no icons/labels)
         roundRect(ctx, x, y, btn.w, btn.h, BTN_RADIUS);
         ctx.fillStyle = fill;
         ctx.fill();
@@ -275,7 +272,7 @@ function drawVirtualButtons() {
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // subtle overlay showing which button is currently "locked" as lastActivation
+        // subtle colourchange for selected button
         if (roundActive && lastActivatedIndex === idx) {
             ctx.fillStyle = "rgba(255,255,255,0.12)";
             ctx.fill();
@@ -283,7 +280,7 @@ function drawVirtualButtons() {
     });
 }
 
-// ---------- Draw: triangle (bigger; positions requested) ----------
+// ---------- Draw Indicator
 function drawTriangleIndicator() {
     if (!roundActive) return;
 
@@ -333,7 +330,7 @@ function drawTriangleIndicator() {
     ctx.restore();
 }
 
-// ---------- HUD: hearts ----------
+// ---------- HUD: hearts
 function drawHearts() {
     const x0 = 12, y0 = 12, gap = 10, size = 16;
     for (let i = 0; i < MAX_HP; i++) {
@@ -367,7 +364,7 @@ function drawHeart(x: number, y: number, size: number, filled: boolean) {
     ctx.restore();
 }
 
-// ---------- GAME OVER overlay ----------
+// ---------- GAME OVER
 function drawGameOver() {
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -381,65 +378,6 @@ function drawGameOver() {
     ctx.font = "16px system-ui, sans-serif";
     ctx.fillText("Refresh to play again", canvas.width / 2, canvas.height / 2 + 40);
     ctx.restore();
-}
-
-// ---------- (Optional) original actions if GAME_MODE=false ----------
-function triggerAction(action: Button["action"]) {
-    if (action === "capture") {
-        lastCaptureCanvas = createCaptureToGallery();
-    } else if (action === "grayscale") {
-        if (!lastCaptureCanvas) { console.log("No capture yet to grayscale."); return; }
-        grayscaleCanvas(lastCaptureCanvas);
-    } else if (action === "save") {
-        if (!lastCaptureCanvas) { console.log("No capture yet to save."); return; }
-        const a = document.createElement("a");
-        a.download = `capture-${Date.now()}.png`;
-        a.href = lastCaptureCanvas.toDataURL("image/png");
-        a.click();
-    }
-}
-
-// ---------- Gallery helpers ----------
-function createCaptureToGallery(): HTMLCanvasElement {
-    const w = video.videoWidth, h = video.videoHeight;
-
-    const wrap = document.createElement("div");
-    wrap.className = "thumb latest";
-    const prevLatest = gallery.querySelector(".thumb.latest");
-    if (prevLatest) prevLatest.classList.remove("latest");
-
-    const c = document.createElement("canvas");
-    c.width = w; c.height = h;
-    const cctx = c.getContext("2d")!;
-    cctx.drawImage(video, 0, 0, w, h);
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = new Date().toLocaleTimeString();
-
-    wrap.appendChild(c);
-    wrap.appendChild(meta);
-    gallery.prepend(wrap);
-
-    c.addEventListener("click", () => {
-        const old = gallery.querySelector(".thumb.latest");
-        if (old) old.classList.remove("latest");
-        wrap.classList.add("latest");
-        lastCaptureCanvas = c;
-    });
-
-    return c;
-}
-
-function grayscaleCanvas(target: HTMLCanvasElement) {
-    const gctx = target.getContext("2d")!;
-    const img = gctx.getImageData(0, 0, target.width, target.height);
-    const data = img.data;
-    for (let i = 0; i < data.length; i += 4) {
-        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        data[i] = data[i + 1] = data[i + 2] = avg;
-    }
-    gctx.putImageData(img, 0, 0);
 }
 
 // ---------- Drawing utilities ----------
@@ -457,7 +395,7 @@ function roundRect(
     ctx.closePath();
 }
 
-// ---------- Helpers ----------
+// ---------- Helpers
 function resolve(v: number | (() => number)): number {
     return (typeof v === "function") ? v() : v;
 }
